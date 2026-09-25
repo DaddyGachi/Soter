@@ -123,30 +123,28 @@ def check_queue_pressure() -> Optional[Tuple[str, Dict[str, Any]]]:
         # Broker unreachable is not a queue-depth overload signal. Let the
         # request proceed so validation and enqueue logic can handle it.
         return None
-    
+
     # Graduated queue depth thresholds
     if depth >= settings.load_shed_max_celery_queue_depth:
         return "queue_full", {
             "queue_depth": depth,
             "max_queue_depth": settings.load_shed_max_celery_queue_depth,
         }
-    
+
     # Check for high queue pressure (intermediate threshold)
-    high_threshold = getattr(
-        settings, "load_shed_high_celery_queue_depth", None
-    )
+    high_threshold = getattr(settings, "load_shed_high_celery_queue_depth", None)
     if high_threshold and depth >= high_threshold:
         return "queue_high", {
             "queue_depth": depth,
             "high_threshold": high_threshold,
         }
-    
+
     return None
 
 
 def get_llm_provider_health() -> Optional[str]:
     """Return provider health status: 'down', 'degraded', or None (healthy).
-    
+
     This provides a graduated signal instead of binary down/healthy.
     """
     if settings.app_env == "test" or settings.test_provider_mode:
@@ -158,7 +156,7 @@ def get_llm_provider_health() -> Optional[str]:
         service = _main.humanitarian_verification_service
         if service.all_providers_unavailable():
             return "down"
-        
+
         # Check if providers are degraded (some failing but not all)
         # This is a heuristic based on circuit breaker state
         if hasattr(service, "get_provider_failure_rate"):
@@ -171,7 +169,7 @@ def get_llm_provider_health() -> Optional[str]:
     except Exception as exc:
         logger.warning("Failed to evaluate LLM provider health: %s", exc)
         return None
-    
+
     return None
 
 
@@ -201,6 +199,7 @@ def _extract_priority_from_request(request: Request) -> str:
     try:
         # Try to parse JSON body to extract priority
         import json
+
         body = request._body.decode("utf-8") if request._body else "{}"
         payload = json.loads(body)
         priority = payload.get("priority", "normal")
@@ -214,12 +213,8 @@ def _extract_priority_from_request(request: Request) -> str:
 
 def _get_shed_thresholds() -> tuple:
     """Get configured shedding thresholds."""
-    high_threshold = getattr(
-        settings, "load_shed_high_celery_queue_depth", None
-    )
-    low_threshold = getattr(
-        settings, "load_shed_low_celery_queue_depth", None
-    )
+    high_threshold = getattr(settings, "load_shed_high_celery_queue_depth", None)
+    low_threshold = getattr(settings, "load_shed_low_celery_queue_depth", None)
     max_threshold = settings.load_shed_max_celery_queue_depth
     return high_threshold, low_threshold, max_threshold
 
@@ -228,30 +223,30 @@ def _should_shed_based_on_priority(
     priority: str, queue_depth: Optional[int] = None
 ) -> bool:
     """Determine if a request should be shed based on priority and queue depth.
-    
+
     High priority requests are only shed under extreme conditions.
     Normal priority requests are shed under high conditions.
     Low priority requests are shed more aggressively.
     """
     if queue_depth is None:
         return False
-    
+
     high_threshold, low_threshold, max_threshold = _get_shed_thresholds()
-    
+
     # Priority-based shedding rules
     if priority == "high":
         return queue_depth >= max_threshold
-    
+
     if priority == "normal":
         return queue_depth >= max_threshold or (
             high_threshold and queue_depth >= high_threshold
         )
-    
+
     if priority == "low":
         return (low_threshold and queue_depth >= low_threshold) or (
             high_threshold and queue_depth >= high_threshold
         )
-    
+
     return False
 
 
@@ -282,7 +277,12 @@ def evaluate_load_shed(request: Request) -> Optional[JSONResponse]:
             # Apply priority-based shedding for queue pressure
             if _should_shed_based_on_priority(priority, queue_depth):
                 return build_shed_response(
-                    reason, method, path, details=details, queue_depth=queue_depth, priority=priority
+                    reason,
+                    method,
+                    path,
+                    details=details,
+                    queue_depth=queue_depth,
+                    priority=priority,
                 )
 
     if _is_llm_route(path, method):
@@ -291,7 +291,12 @@ def evaluate_load_shed(request: Request) -> Optional[JSONResponse]:
             reason, details = provider_result
             # Provider degradation sheds all requests (no priority exemption)
             return build_shed_response(
-                reason, method, path, details=details, provider_health=details.get("provider_health"), priority=priority
+                reason,
+                method,
+                path,
+                details=details,
+                provider_health=details.get("provider_health"),
+                priority=priority,
             )
 
     return None

@@ -158,11 +158,14 @@ class TestMiddlewareLoadShedding:
             "services.load_shedder.check_queue_pressure",
             return_value=("queue_high", {"queue_depth": 80}),
         ), patch("services.load_shedder.settings") as mock_settings, patch(
-            "services.load_shedder._extract_priority_from_request", return_value="normal"
+            "services.load_shedder._extract_priority_from_request",
+            return_value="normal",
         ):
             mock_settings.load_shed_max_celery_queue_depth = 100
             mock_settings.load_shed_high_celery_queue_depth = 75
-            response = client.post("/v1/ai/inference", json={"type": "inference", "priority": "normal"})
+            response = client.post(
+                "/v1/ai/inference", json={"type": "inference", "priority": "normal"}
+            )
         assert response.status_code == 503
         assert_shed_envelope(response.json(), "queue_high")
 
@@ -172,7 +175,10 @@ class TestMiddlewareLoadShedding:
         pass
 
     def test_humanitarian_shed_when_providers_down(self, client):
-        with patch("services.load_shedder.check_provider_pressure", return_value=("provider_down", {"provider_health": "down"})):
+        with patch(
+            "services.load_shedder.check_provider_pressure",
+            return_value=("provider_down", {"provider_health": "down"}),
+        ):
             response = client.post(
                 "/v1/ai/humanitarian/verify",
                 json={"aid_claim": "Need food assistance"},
@@ -181,7 +187,10 @@ class TestMiddlewareLoadShedding:
         assert_shed_envelope(response.json(), "provider_down")
 
     def test_humanitarian_shed_when_providers_degraded(self, client):
-        with patch("services.load_shedder.check_provider_pressure", return_value=("provider_degraded", {"provider_health": "degraded"})):
+        with patch(
+            "services.load_shedder.check_provider_pressure",
+            return_value=("provider_degraded", {"provider_health": "degraded"}),
+        ):
             response = client.post(
                 "/v1/ai/humanitarian/verify",
                 json={"aid_claim": "Need food assistance"},
@@ -214,55 +223,55 @@ class TestPriorityBasedShedding:
     def test_extract_priority_from_request(self):
         from fastapi import Request
         from unittest.mock import Mock
-        
+
         # Test with priority in body
         mock_request = Mock(spec=Request)
         mock_request._body = b'{"priority": "high"}'
         assert _extract_priority_from_request(mock_request) == "high"
-        
+
         # Test with missing priority (defaults to normal)
-        mock_request._body = b'{}'
+        mock_request._body = b"{}"
         assert _extract_priority_from_request(mock_request) == "normal"
-        
+
         # Test with invalid priority (defaults to normal)
         mock_request._body = b'{"priority": "invalid"}'
         assert _extract_priority_from_request(mock_request) == "normal"
-    
+
     def test_should_shed_high_priority(self):
         with patch("services.load_shedder.settings") as mock_settings:
             mock_settings.load_shed_max_celery_queue_depth = 100
             mock_settings.load_shed_high_celery_queue_depth = 75
             mock_settings.load_shed_low_celery_queue_depth = 50
-            
+
             # High priority only sheds at max
             assert not _should_shed_based_on_priority("high", 75)
             assert not _should_shed_based_on_priority("high", 99)
             assert _should_shed_based_on_priority("high", 100)
             assert _should_shed_based_on_priority("high", 150)
-    
+
     def test_should_shed_normal_priority(self):
         with patch("services.load_shedder.settings") as mock_settings:
             mock_settings.load_shed_max_celery_queue_depth = 100
             mock_settings.load_shed_high_celery_queue_depth = 75
             mock_settings.load_shed_low_celery_queue_depth = 50
-            
+
             # Normal priority sheds at high threshold and max
             assert not _should_shed_based_on_priority("normal", 50)
             assert _should_shed_based_on_priority("normal", 75)
             assert _should_shed_based_on_priority("normal", 100)
-    
+
     def test_should_shed_low_priority(self):
         with patch("services.load_shedder.settings") as mock_settings:
             mock_settings.load_shed_max_celery_queue_depth = 100
             mock_settings.load_shed_high_celery_queue_depth = 75
             mock_settings.load_shed_low_celery_queue_depth = 50
-            
+
             # Low priority sheds at low threshold, high threshold, and max
             assert not _should_shed_based_on_priority("low", 49)
             assert _should_shed_based_on_priority("low", 50)
             assert _should_shed_based_on_priority("low", 75)
             assert _should_shed_based_on_priority("low", 100)
-    
+
     def test_should_shed_no_queue_depth(self):
         # No queue depth means no shedding
         assert not _should_shed_based_on_priority("high", None)
@@ -272,21 +281,25 @@ class TestPriorityBasedShedding:
 
 class TestProviderHealthSignal:
     def test_provider_down_signal(self):
-        with patch("services.load_shedder.get_llm_provider_health", return_value="down"):
+        with patch(
+            "services.load_shedder.get_llm_provider_health", return_value="down"
+        ):
             result = check_provider_pressure()
         assert result is not None
         reason, details = result
         assert reason == "provider_down"
         assert details["provider_health"] == "down"
-    
+
     def test_provider_degraded_signal(self):
-        with patch("services.load_shedder.get_llm_provider_health", return_value="degraded"):
+        with patch(
+            "services.load_shedder.get_llm_provider_health", return_value="degraded"
+        ):
             result = check_provider_pressure()
         assert result is not None
         reason, details = result
         assert reason == "provider_degraded"
         assert details["provider_health"] == "degraded"
-    
+
     def test_provider_healthy_no_shed(self):
         with patch("services.load_shedder.get_llm_provider_health", return_value=None):
             result = check_provider_pressure()
